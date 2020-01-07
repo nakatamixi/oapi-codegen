@@ -16,6 +16,7 @@ import (
 	"io/ioutil"
 	"net/http"
 	"net/url"
+	"path"
 	"strings"
 )
 
@@ -33,39 +34,88 @@ type Object struct {
 
 // GetCookieParams defines parameters for GetCookie.
 type GetCookieParams struct {
-	P  *int32         `json:"p,omitempty"`
-	Ep *int32         `json:"ep,omitempty"`
-	Ea *[]int32       `json:"ea,omitempty"`
-	A  *[]int32       `json:"a,omitempty"`
-	Eo *Object        `json:"eo,omitempty"`
-	O  *Object        `json:"o,omitempty"`
+
+	// primitive
+	P *int32 `json:"p,omitempty"`
+
+	// primitive
+	Ep *int32 `json:"ep,omitempty"`
+
+	// exploded array
+	Ea *[]int32 `json:"ea,omitempty"`
+
+	// array
+	A *[]int32 `json:"a,omitempty"`
+
+	// exploded object
+	Eo *Object `json:"eo,omitempty"`
+
+	// object
+	O *Object `json:"o,omitempty"`
+
+	// complex object
 	Co *ComplexObject `json:"co,omitempty"`
 }
 
 // GetHeaderParams defines parameters for GetHeader.
 type GetHeaderParams struct {
-	XPrimitive         *int32         `json:"X-Primitive,omitempty"`
-	XPrimitiveExploded *int32         `json:"X-Primitive-Exploded,omitempty"`
-	XArrayExploded     *[]int32       `json:"X-Array-Exploded,omitempty"`
-	XArray             *[]int32       `json:"X-Array,omitempty"`
-	XObjectExploded    *Object        `json:"X-Object-Exploded,omitempty"`
-	XObject            *Object        `json:"X-Object,omitempty"`
-	XComplexObject     *ComplexObject `json:"X-Complex-Object,omitempty"`
+
+	// primitive
+	XPrimitive *int32 `json:"X-Primitive,omitempty"`
+
+	// primitive
+	XPrimitiveExploded *int32 `json:"X-Primitive-Exploded,omitempty"`
+
+	// exploded array
+	XArrayExploded *[]int32 `json:"X-Array-Exploded,omitempty"`
+
+	// array
+	XArray *[]int32 `json:"X-Array,omitempty"`
+
+	// exploded object
+	XObjectExploded *Object `json:"X-Object-Exploded,omitempty"`
+
+	// object
+	XObject *Object `json:"X-Object,omitempty"`
+
+	// complex object
+	XComplexObject *ComplexObject `json:"X-Complex-Object,omitempty"`
 }
 
 // GetQueryFormParams defines parameters for GetQueryForm.
 type GetQueryFormParams struct {
-	Ea *[]int32       `json:"ea,omitempty"`
-	A  *[]int32       `json:"a,omitempty"`
-	Eo *Object        `json:"eo,omitempty"`
-	O  *Object        `json:"o,omitempty"`
-	Ep *int32         `json:"ep,omitempty"`
-	P  *int32         `json:"p,omitempty"`
+
+	// exploded array
+	Ea *[]int32 `json:"ea,omitempty"`
+
+	// array
+	A *[]int32 `json:"a,omitempty"`
+
+	// exploded object
+	Eo *Object `json:"eo,omitempty"`
+
+	// object
+	O *Object `json:"o,omitempty"`
+
+	// exploded primitive
+	Ep *int32 `json:"ep,omitempty"`
+
+	// primitive
+	P *int32 `json:"p,omitempty"`
+
+	// complex object
 	Co *ComplexObject `json:"co,omitempty"`
 }
 
 // RequestEditorFn  is the function signature for the RequestEditor callback function
 type RequestEditorFn func(req *http.Request, ctx context.Context) error
+
+// Doer performs HTTP requests.
+//
+// The standard http.Client implements this interface.
+type HttpRequestDoer interface {
+	Do(req *http.Request) (*http.Response, error)
+}
 
 // Client which conforms to the OpenAPI3 specification for this service.
 type Client struct {
@@ -73,12 +123,53 @@ type Client struct {
 	// https://api.deepmap.com for example.
 	Server string
 
-	// HTTP client with any customized settings, such as certificate chains.
-	Client http.Client
+	// Doer for performing requests, typically a *http.Client with any
+	// customized settings, such as certificate chains.
+	Client HttpRequestDoer
 
 	// A callback for modifying requests which are generated before sending over
 	// the network.
 	RequestEditor RequestEditorFn
+}
+
+// ClientOption allows setting custom parameters during construction
+type ClientOption func(*Client) error
+
+// Creates a new Client, with reasonable defaults
+func NewClient(server string, opts ...ClientOption) (*Client, error) {
+	// create a client with sane default values
+	client := Client{
+		Server: server,
+	}
+	// mutate client and add all optional params
+	for _, o := range opts {
+		if err := o(&client); err != nil {
+			return nil, err
+		}
+	}
+	// create httpClient, if not already present
+	if client.Client == nil {
+		client.Client = http.DefaultClient
+	}
+	return &client, nil
+}
+
+// WithHTTPClient allows overriding the default Doer, which is
+// automatically created using http.Client. This is useful for tests.
+func WithHTTPClient(doer HttpRequestDoer) ClientOption {
+	return func(c *Client) error {
+		c.Client = doer
+		return nil
+	}
+}
+
+// WithRequestEditorFn allows setting up a callback function, which will be
+// called right before sending the request. This can be used to mutate the request.
+func WithRequestEditorFn(fn RequestEditorFn) ClientOption {
+	return func(c *Client) error {
+		c.RequestEditor = fn
+		return nil
+	}
 }
 
 // The interface specification for the client above.
@@ -421,9 +512,13 @@ func NewGetContentObjectRequest(server string, param ComplexObject) (*http.Reque
 	}
 	pathParam0 = string(pathParamBuf0)
 
-	queryUrl := fmt.Sprintf("%s/contentObject/%s", server, pathParam0)
+	queryUrl, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+	queryUrl.Path = path.Join(queryUrl.Path, fmt.Sprintf("/contentObject/%s", pathParam0))
 
-	req, err := http.NewRequest("GET", queryUrl, nil)
+	req, err := http.NewRequest("GET", queryUrl.String(), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -435,9 +530,13 @@ func NewGetContentObjectRequest(server string, param ComplexObject) (*http.Reque
 func NewGetCookieRequest(server string, params *GetCookieParams) (*http.Request, error) {
 	var err error
 
-	queryUrl := fmt.Sprintf("%s/cookie", server)
+	queryUrl, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+	queryUrl.Path = path.Join(queryUrl.Path, fmt.Sprintf("/cookie"))
 
-	req, err := http.NewRequest("GET", queryUrl, nil)
+	req, err := http.NewRequest("GET", queryUrl.String(), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -556,9 +655,13 @@ func NewGetCookieRequest(server string, params *GetCookieParams) (*http.Request,
 func NewGetHeaderRequest(server string, params *GetHeaderParams) (*http.Request, error) {
 	var err error
 
-	queryUrl := fmt.Sprintf("%s/header", server)
+	queryUrl, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+	queryUrl.Path = path.Join(queryUrl.Path, fmt.Sprintf("/header"))
 
-	req, err := http.NewRequest("GET", queryUrl, nil)
+	req, err := http.NewRequest("GET", queryUrl.String(), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -656,9 +759,13 @@ func NewGetLabelExplodeArrayRequest(server string, param []int32) (*http.Request
 		return nil, err
 	}
 
-	queryUrl := fmt.Sprintf("%s/labelExplodeArray/%s", server, pathParam0)
+	queryUrl, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+	queryUrl.Path = path.Join(queryUrl.Path, fmt.Sprintf("/labelExplodeArray/%s", pathParam0))
 
-	req, err := http.NewRequest("GET", queryUrl, nil)
+	req, err := http.NewRequest("GET", queryUrl.String(), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -677,9 +784,13 @@ func NewGetLabelExplodeObjectRequest(server string, param Object) (*http.Request
 		return nil, err
 	}
 
-	queryUrl := fmt.Sprintf("%s/labelExplodeObject/%s", server, pathParam0)
+	queryUrl, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+	queryUrl.Path = path.Join(queryUrl.Path, fmt.Sprintf("/labelExplodeObject/%s", pathParam0))
 
-	req, err := http.NewRequest("GET", queryUrl, nil)
+	req, err := http.NewRequest("GET", queryUrl.String(), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -698,9 +809,13 @@ func NewGetLabelNoExplodeArrayRequest(server string, param []int32) (*http.Reque
 		return nil, err
 	}
 
-	queryUrl := fmt.Sprintf("%s/labelNoExplodeArray/%s", server, pathParam0)
+	queryUrl, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+	queryUrl.Path = path.Join(queryUrl.Path, fmt.Sprintf("/labelNoExplodeArray/%s", pathParam0))
 
-	req, err := http.NewRequest("GET", queryUrl, nil)
+	req, err := http.NewRequest("GET", queryUrl.String(), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -719,9 +834,13 @@ func NewGetLabelNoExplodeObjectRequest(server string, param Object) (*http.Reque
 		return nil, err
 	}
 
-	queryUrl := fmt.Sprintf("%s/labelNoExplodeObject/%s", server, pathParam0)
+	queryUrl, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+	queryUrl.Path = path.Join(queryUrl.Path, fmt.Sprintf("/labelNoExplodeObject/%s", pathParam0))
 
-	req, err := http.NewRequest("GET", queryUrl, nil)
+	req, err := http.NewRequest("GET", queryUrl.String(), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -740,9 +859,13 @@ func NewGetMatrixExplodeArrayRequest(server string, id []int32) (*http.Request, 
 		return nil, err
 	}
 
-	queryUrl := fmt.Sprintf("%s/matrixExplodeArray/%s", server, pathParam0)
+	queryUrl, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+	queryUrl.Path = path.Join(queryUrl.Path, fmt.Sprintf("/matrixExplodeArray/%s", pathParam0))
 
-	req, err := http.NewRequest("GET", queryUrl, nil)
+	req, err := http.NewRequest("GET", queryUrl.String(), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -761,9 +884,13 @@ func NewGetMatrixExplodeObjectRequest(server string, id Object) (*http.Request, 
 		return nil, err
 	}
 
-	queryUrl := fmt.Sprintf("%s/matrixExplodeObject/%s", server, pathParam0)
+	queryUrl, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+	queryUrl.Path = path.Join(queryUrl.Path, fmt.Sprintf("/matrixExplodeObject/%s", pathParam0))
 
-	req, err := http.NewRequest("GET", queryUrl, nil)
+	req, err := http.NewRequest("GET", queryUrl.String(), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -782,9 +909,13 @@ func NewGetMatrixNoExplodeArrayRequest(server string, id []int32) (*http.Request
 		return nil, err
 	}
 
-	queryUrl := fmt.Sprintf("%s/matrixNoExplodeArray/%s", server, pathParam0)
+	queryUrl, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+	queryUrl.Path = path.Join(queryUrl.Path, fmt.Sprintf("/matrixNoExplodeArray/%s", pathParam0))
 
-	req, err := http.NewRequest("GET", queryUrl, nil)
+	req, err := http.NewRequest("GET", queryUrl.String(), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -803,9 +934,13 @@ func NewGetMatrixNoExplodeObjectRequest(server string, id Object) (*http.Request
 		return nil, err
 	}
 
-	queryUrl := fmt.Sprintf("%s/matrixNoExplodeObject/%s", server, pathParam0)
+	queryUrl, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+	queryUrl.Path = path.Join(queryUrl.Path, fmt.Sprintf("/matrixNoExplodeObject/%s", pathParam0))
 
-	req, err := http.NewRequest("GET", queryUrl, nil)
+	req, err := http.NewRequest("GET", queryUrl.String(), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -821,9 +956,13 @@ func NewGetPassThroughRequest(server string, param string) (*http.Request, error
 
 	pathParam0 = param
 
-	queryUrl := fmt.Sprintf("%s/passThrough/%s", server, pathParam0)
+	queryUrl, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+	queryUrl.Path = path.Join(queryUrl.Path, fmt.Sprintf("/passThrough/%s", pathParam0))
 
-	req, err := http.NewRequest("GET", queryUrl, nil)
+	req, err := http.NewRequest("GET", queryUrl.String(), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -835,94 +974,123 @@ func NewGetPassThroughRequest(server string, param string) (*http.Request, error
 func NewGetQueryFormRequest(server string, params *GetQueryFormParams) (*http.Request, error) {
 	var err error
 
-	queryUrl := fmt.Sprintf("%s/queryForm", server)
+	queryUrl, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+	queryUrl.Path = path.Join(queryUrl.Path, fmt.Sprintf("/queryForm"))
 
-	var queryStrings []string
+	queryValues := queryUrl.Query()
 
-	var queryParam0 string
 	if params.Ea != nil {
 
-		queryParam0, err = runtime.StyleParam("form", true, "ea", *params.Ea)
-		if err != nil {
+		if queryFrag, err := runtime.StyleParam("form", true, "ea", *params.Ea); err != nil {
 			return nil, err
+		} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+			return nil, err
+		} else {
+			for k, v := range parsed {
+				for _, v2 := range v {
+					queryValues.Add(k, v2)
+				}
+			}
 		}
 
-		queryStrings = append(queryStrings, queryParam0)
 	}
 
-	var queryParam1 string
 	if params.A != nil {
 
-		queryParam1, err = runtime.StyleParam("form", false, "a", *params.A)
-		if err != nil {
+		if queryFrag, err := runtime.StyleParam("form", false, "a", *params.A); err != nil {
 			return nil, err
+		} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+			return nil, err
+		} else {
+			for k, v := range parsed {
+				for _, v2 := range v {
+					queryValues.Add(k, v2)
+				}
+			}
 		}
 
-		queryStrings = append(queryStrings, queryParam1)
 	}
 
-	var queryParam2 string
 	if params.Eo != nil {
 
-		queryParam2, err = runtime.StyleParam("form", true, "eo", *params.Eo)
-		if err != nil {
+		if queryFrag, err := runtime.StyleParam("form", true, "eo", *params.Eo); err != nil {
 			return nil, err
+		} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+			return nil, err
+		} else {
+			for k, v := range parsed {
+				for _, v2 := range v {
+					queryValues.Add(k, v2)
+				}
+			}
 		}
 
-		queryStrings = append(queryStrings, queryParam2)
 	}
 
-	var queryParam3 string
 	if params.O != nil {
 
-		queryParam3, err = runtime.StyleParam("form", false, "o", *params.O)
-		if err != nil {
+		if queryFrag, err := runtime.StyleParam("form", false, "o", *params.O); err != nil {
 			return nil, err
+		} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+			return nil, err
+		} else {
+			for k, v := range parsed {
+				for _, v2 := range v {
+					queryValues.Add(k, v2)
+				}
+			}
 		}
 
-		queryStrings = append(queryStrings, queryParam3)
 	}
 
-	var queryParam4 string
 	if params.Ep != nil {
 
-		queryParam4, err = runtime.StyleParam("form", true, "ep", *params.Ep)
-		if err != nil {
+		if queryFrag, err := runtime.StyleParam("form", true, "ep", *params.Ep); err != nil {
 			return nil, err
+		} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+			return nil, err
+		} else {
+			for k, v := range parsed {
+				for _, v2 := range v {
+					queryValues.Add(k, v2)
+				}
+			}
 		}
 
-		queryStrings = append(queryStrings, queryParam4)
 	}
 
-	var queryParam5 string
 	if params.P != nil {
 
-		queryParam5, err = runtime.StyleParam("form", false, "p", *params.P)
-		if err != nil {
+		if queryFrag, err := runtime.StyleParam("form", false, "p", *params.P); err != nil {
 			return nil, err
+		} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+			return nil, err
+		} else {
+			for k, v := range parsed {
+				for _, v2 := range v {
+					queryValues.Add(k, v2)
+				}
+			}
 		}
 
-		queryStrings = append(queryStrings, queryParam5)
 	}
 
-	var queryParam6 string
 	if params.Co != nil {
 
-		var queryParamBuf6 []byte
-		queryParamBuf6, err = json.Marshal(*params.Co)
-		if err != nil {
+		if queryParamBuf, err := json.Marshal(*params.Co); err != nil {
 			return nil, err
+		} else {
+			queryValues.Add("co", string(queryParamBuf))
 		}
-		queryParam6 = "co=" + string(queryParamBuf6)
 
-		queryStrings = append(queryStrings, queryParam6)
 	}
 
-	if len(queryStrings) != 0 {
-		queryUrl += "?" + strings.Join(queryStrings, "&")
-	}
+	queryUrl.RawQuery = queryValues.Encode()
 
-	req, err := http.NewRequest("GET", queryUrl, nil)
+	req, err := http.NewRequest("GET", queryUrl.String(), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -941,9 +1109,13 @@ func NewGetSimpleExplodeArrayRequest(server string, param []int32) (*http.Reques
 		return nil, err
 	}
 
-	queryUrl := fmt.Sprintf("%s/simpleExplodeArray/%s", server, pathParam0)
+	queryUrl, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+	queryUrl.Path = path.Join(queryUrl.Path, fmt.Sprintf("/simpleExplodeArray/%s", pathParam0))
 
-	req, err := http.NewRequest("GET", queryUrl, nil)
+	req, err := http.NewRequest("GET", queryUrl.String(), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -962,9 +1134,13 @@ func NewGetSimpleExplodeObjectRequest(server string, param Object) (*http.Reques
 		return nil, err
 	}
 
-	queryUrl := fmt.Sprintf("%s/simpleExplodeObject/%s", server, pathParam0)
+	queryUrl, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+	queryUrl.Path = path.Join(queryUrl.Path, fmt.Sprintf("/simpleExplodeObject/%s", pathParam0))
 
-	req, err := http.NewRequest("GET", queryUrl, nil)
+	req, err := http.NewRequest("GET", queryUrl.String(), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -983,9 +1159,13 @@ func NewGetSimpleNoExplodeArrayRequest(server string, param []int32) (*http.Requ
 		return nil, err
 	}
 
-	queryUrl := fmt.Sprintf("%s/simpleNoExplodeArray/%s", server, pathParam0)
+	queryUrl, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+	queryUrl.Path = path.Join(queryUrl.Path, fmt.Sprintf("/simpleNoExplodeArray/%s", pathParam0))
 
-	req, err := http.NewRequest("GET", queryUrl, nil)
+	req, err := http.NewRequest("GET", queryUrl.String(), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -1004,9 +1184,13 @@ func NewGetSimpleNoExplodeObjectRequest(server string, param Object) (*http.Requ
 		return nil, err
 	}
 
-	queryUrl := fmt.Sprintf("%s/simpleNoExplodeObject/%s", server, pathParam0)
+	queryUrl, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+	queryUrl.Path = path.Join(queryUrl.Path, fmt.Sprintf("/simpleNoExplodeObject/%s", pathParam0))
 
-	req, err := http.NewRequest("GET", queryUrl, nil)
+	req, err := http.NewRequest("GET", queryUrl.String(), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -1025,9 +1209,13 @@ func NewGetSimplePrimitiveRequest(server string, param int32) (*http.Request, er
 		return nil, err
 	}
 
-	queryUrl := fmt.Sprintf("%s/simplePrimitive/%s", server, pathParam0)
+	queryUrl, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+	queryUrl.Path = path.Join(queryUrl.Path, fmt.Sprintf("/simplePrimitive/%s", pathParam0))
 
-	req, err := http.NewRequest("GET", queryUrl, nil)
+	req, err := http.NewRequest("GET", queryUrl.String(), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -1040,24 +1228,28 @@ type ClientWithResponses struct {
 	ClientInterface
 }
 
-// NewClientWithResponses returns a ClientWithResponses with a default Client:
-func NewClientWithResponses(server string) *ClientWithResponses {
-	return &ClientWithResponses{
-		ClientInterface: &Client{
-			Client: http.Client{},
-			Server: server,
-		},
+// NewClientWithResponses creates a new ClientWithResponses, which wraps
+// Client with return type handling
+func NewClientWithResponses(server string, opts ...ClientOption) (*ClientWithResponses, error) {
+	client, err := NewClient(server, opts...)
+	if err != nil {
+		return nil, err
 	}
+	return &ClientWithResponses{client}, nil
 }
 
-// NewClientWithResponsesAndRequestEditorFunc takes in a RequestEditorFn callback function and returns a ClientWithResponses with a default Client:
-func NewClientWithResponsesAndRequestEditorFunc(server string, reqEditorFn RequestEditorFn) *ClientWithResponses {
-	return &ClientWithResponses{
-		ClientInterface: &Client{
-			Client:        http.Client{},
-			Server:        server,
-			RequestEditor: reqEditorFn,
-		},
+// WithBaseURL overrides the baseURL.
+func WithBaseURL(baseURL string) ClientOption {
+	return func(c *Client) error {
+		if !strings.HasSuffix(baseURL, "/") {
+			baseURL += "/"
+		}
+		newBaseURL, err := url.Parse(baseURL)
+		if err != nil {
+			return err
+		}
+		c.Server = newBaseURL.String()
+		return nil
 	}
 }
 
@@ -2522,7 +2714,17 @@ func (w *ServerInterfaceWrapper) GetSimplePrimitive(ctx echo.Context) error {
 }
 
 // RegisterHandlers adds each server route to the EchoRouter.
-func RegisterHandlers(router runtime.EchoRouter, si ServerInterface) {
+func RegisterHandlers(router interface {
+	CONNECT(path string, h echo.HandlerFunc, m ...echo.MiddlewareFunc) *echo.Route
+	DELETE(path string, h echo.HandlerFunc, m ...echo.MiddlewareFunc) *echo.Route
+	GET(path string, h echo.HandlerFunc, m ...echo.MiddlewareFunc) *echo.Route
+	HEAD(path string, h echo.HandlerFunc, m ...echo.MiddlewareFunc) *echo.Route
+	OPTIONS(path string, h echo.HandlerFunc, m ...echo.MiddlewareFunc) *echo.Route
+	PATCH(path string, h echo.HandlerFunc, m ...echo.MiddlewareFunc) *echo.Route
+	POST(path string, h echo.HandlerFunc, m ...echo.MiddlewareFunc) *echo.Route
+	PUT(path string, h echo.HandlerFunc, m ...echo.MiddlewareFunc) *echo.Route
+	TRACE(path string, h echo.HandlerFunc, m ...echo.MiddlewareFunc) *echo.Route
+}, si ServerInterface) {
 
 	wrapper := ServerInterfaceWrapper{
 		Handler: si,

@@ -12,6 +12,8 @@ import (
 	"io"
 	"io/ioutil"
 	"net/http"
+	"net/url"
+	"path"
 	"strings"
 )
 
@@ -37,8 +39,12 @@ type Pet struct {
 
 // FindPetsParams defines parameters for FindPets.
 type FindPetsParams struct {
-	Tags  *[]string `json:"tags,omitempty"`
-	Limit *int32    `json:"limit,omitempty"`
+
+	// tags to filter by
+	Tags *[]string `json:"tags,omitempty"`
+
+	// maximum number of results to return
+	Limit *int32 `json:"limit,omitempty"`
 }
 
 // addPetJSONBody defines parameters for AddPet.
@@ -50,18 +56,66 @@ type AddPetJSONRequestBody addPetJSONBody
 // RequestEditorFn  is the function signature for the RequestEditor callback function
 type RequestEditorFn func(req *http.Request, ctx context.Context) error
 
+// Doer performs HTTP requests.
+//
+// The standard http.Client implements this interface.
+type HttpRequestDoer interface {
+	Do(req *http.Request) (*http.Response, error)
+}
+
 // Client which conforms to the OpenAPI3 specification for this service.
 type Client struct {
 	// The endpoint of the server conforming to this interface, with scheme,
 	// https://api.deepmap.com for example.
 	Server string
 
-	// HTTP client with any customized settings, such as certificate chains.
-	Client http.Client
+	// Doer for performing requests, typically a *http.Client with any
+	// customized settings, such as certificate chains.
+	Client HttpRequestDoer
 
 	// A callback for modifying requests which are generated before sending over
 	// the network.
 	RequestEditor RequestEditorFn
+}
+
+// ClientOption allows setting custom parameters during construction
+type ClientOption func(*Client) error
+
+// Creates a new Client, with reasonable defaults
+func NewClient(server string, opts ...ClientOption) (*Client, error) {
+	// create a client with sane default values
+	client := Client{
+		Server: server,
+	}
+	// mutate client and add all optional params
+	for _, o := range opts {
+		if err := o(&client); err != nil {
+			return nil, err
+		}
+	}
+	// create httpClient, if not already present
+	if client.Client == nil {
+		client.Client = http.DefaultClient
+	}
+	return &client, nil
+}
+
+// WithHTTPClient allows overriding the default Doer, which is
+// automatically created using http.Client. This is useful for tests.
+func WithHTTPClient(doer HttpRequestDoer) ClientOption {
+	return func(c *Client) error {
+		c.Client = doer
+		return nil
+	}
+}
+
+// WithRequestEditorFn allows setting up a callback function, which will be
+// called right before sending the request. This can be used to mutate the request.
+func WithRequestEditorFn(fn RequestEditorFn) ClientOption {
+	return func(c *Client) error {
+		c.RequestEditor = fn
+		return nil
+	}
 }
 
 // The interface specification for the client above.
@@ -160,37 +214,49 @@ func (c *Client) FindPetById(ctx context.Context, id int64) (*http.Response, err
 func NewFindPetsRequest(server string, params *FindPetsParams) (*http.Request, error) {
 	var err error
 
-	queryUrl := fmt.Sprintf("%s/pets", server)
+	queryUrl, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+	queryUrl.Path = path.Join(queryUrl.Path, fmt.Sprintf("/pets"))
 
-	var queryStrings []string
+	queryValues := queryUrl.Query()
 
-	var queryParam0 string
 	if params.Tags != nil {
 
-		queryParam0, err = runtime.StyleParam("form", true, "tags", *params.Tags)
-		if err != nil {
+		if queryFrag, err := runtime.StyleParam("form", true, "tags", *params.Tags); err != nil {
 			return nil, err
+		} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+			return nil, err
+		} else {
+			for k, v := range parsed {
+				for _, v2 := range v {
+					queryValues.Add(k, v2)
+				}
+			}
 		}
 
-		queryStrings = append(queryStrings, queryParam0)
 	}
 
-	var queryParam1 string
 	if params.Limit != nil {
 
-		queryParam1, err = runtime.StyleParam("form", true, "limit", *params.Limit)
-		if err != nil {
+		if queryFrag, err := runtime.StyleParam("form", true, "limit", *params.Limit); err != nil {
 			return nil, err
+		} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+			return nil, err
+		} else {
+			for k, v := range parsed {
+				for _, v2 := range v {
+					queryValues.Add(k, v2)
+				}
+			}
 		}
 
-		queryStrings = append(queryStrings, queryParam1)
 	}
 
-	if len(queryStrings) != 0 {
-		queryUrl += "?" + strings.Join(queryStrings, "&")
-	}
+	queryUrl.RawQuery = queryValues.Encode()
 
-	req, err := http.NewRequest("GET", queryUrl, nil)
+	req, err := http.NewRequest("GET", queryUrl.String(), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -213,9 +279,13 @@ func NewAddPetRequest(server string, body AddPetJSONRequestBody) (*http.Request,
 func NewAddPetRequestWithBody(server string, contentType string, body io.Reader) (*http.Request, error) {
 	var err error
 
-	queryUrl := fmt.Sprintf("%s/pets", server)
+	queryUrl, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+	queryUrl.Path = path.Join(queryUrl.Path, fmt.Sprintf("/pets"))
 
-	req, err := http.NewRequest("POST", queryUrl, body)
+	req, err := http.NewRequest("POST", queryUrl.String(), body)
 	if err != nil {
 		return nil, err
 	}
@@ -235,9 +305,13 @@ func NewDeletePetRequest(server string, id int64) (*http.Request, error) {
 		return nil, err
 	}
 
-	queryUrl := fmt.Sprintf("%s/pets/%s", server, pathParam0)
+	queryUrl, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+	queryUrl.Path = path.Join(queryUrl.Path, fmt.Sprintf("/pets/%s", pathParam0))
 
-	req, err := http.NewRequest("DELETE", queryUrl, nil)
+	req, err := http.NewRequest("DELETE", queryUrl.String(), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -256,9 +330,13 @@ func NewFindPetByIdRequest(server string, id int64) (*http.Request, error) {
 		return nil, err
 	}
 
-	queryUrl := fmt.Sprintf("%s/pets/%s", server, pathParam0)
+	queryUrl, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+	queryUrl.Path = path.Join(queryUrl.Path, fmt.Sprintf("/pets/%s", pathParam0))
 
-	req, err := http.NewRequest("GET", queryUrl, nil)
+	req, err := http.NewRequest("GET", queryUrl.String(), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -271,24 +349,28 @@ type ClientWithResponses struct {
 	ClientInterface
 }
 
-// NewClientWithResponses returns a ClientWithResponses with a default Client:
-func NewClientWithResponses(server string) *ClientWithResponses {
-	return &ClientWithResponses{
-		ClientInterface: &Client{
-			Client: http.Client{},
-			Server: server,
-		},
+// NewClientWithResponses creates a new ClientWithResponses, which wraps
+// Client with return type handling
+func NewClientWithResponses(server string, opts ...ClientOption) (*ClientWithResponses, error) {
+	client, err := NewClient(server, opts...)
+	if err != nil {
+		return nil, err
 	}
+	return &ClientWithResponses{client}, nil
 }
 
-// NewClientWithResponsesAndRequestEditorFunc takes in a RequestEditorFn callback function and returns a ClientWithResponses with a default Client:
-func NewClientWithResponsesAndRequestEditorFunc(server string, reqEditorFn RequestEditorFn) *ClientWithResponses {
-	return &ClientWithResponses{
-		ClientInterface: &Client{
-			Client:        http.Client{},
-			Server:        server,
-			RequestEditor: reqEditorFn,
-		},
+// WithBaseURL overrides the baseURL.
+func WithBaseURL(baseURL string) ClientOption {
+	return func(c *Client) error {
+		if !strings.HasSuffix(baseURL, "/") {
+			baseURL += "/"
+		}
+		newBaseURL, err := url.Parse(baseURL)
+		if err != nil {
+			return err
+		}
+		c.Server = newBaseURL.String()
+		return nil
 	}
 }
 

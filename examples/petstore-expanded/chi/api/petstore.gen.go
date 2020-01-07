@@ -38,8 +38,12 @@ type Pet struct {
 
 // FindPetsParams defines parameters for FindPets.
 type FindPetsParams struct {
-	Tags  *[]string `json:"tags,omitempty"`
-	Limit *int32    `json:"limit,omitempty"`
+
+	// tags to filter by
+	Tags *[]string `json:"tags,omitempty"`
+
+	// maximum number of results to return
+	Limit *int32 `json:"limit,omitempty"`
 }
 
 // addPetJSONBody defines parameters for AddPet.
@@ -70,6 +74,7 @@ func FindPetsCtx(next http.Handler) http.Handler {
 		ctx := r.Context()
 
 		var err error
+
 		// Parameter object where we will unmarshal all parameters from the context
 		var params FindPetsParams
 
@@ -95,7 +100,7 @@ func FindPetsCtx(next http.Handler) http.Handler {
 			return
 		}
 
-		ctx = context.WithValue(r.Context(), "FindPetsParams", &params)
+		ctx = context.WithValue(ctx, "FindPetsParams", &params)
 
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
@@ -115,17 +120,18 @@ func DeletePetCtx(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
 
+		var err error
+
 		// ------------- Path parameter "id" -------------
-		var pathErr error
 		var id int64
 
-		pathErr = runtime.BindStyledParameter("simple", false, "id", chi.URLParam(r, "id"), &id)
-		if pathErr != nil {
-			http.Error(w, fmt.Sprintf("Invalid format for parameter id: %s", pathErr), http.StatusBadRequest)
+		err = runtime.BindStyledParameter("simple", false, "id", chi.URLParam(r, "id"), &id)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("Invalid format for parameter id: %s", err), http.StatusBadRequest)
 			return
 		}
 
-		ctx = context.WithValue(r.Context(), "id", id)
+		ctx = context.WithValue(ctx, "id", id)
 
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
@@ -136,17 +142,18 @@ func FindPetByIdCtx(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
 
+		var err error
+
 		// ------------- Path parameter "id" -------------
-		var pathErr error
 		var id int64
 
-		pathErr = runtime.BindStyledParameter("simple", false, "id", chi.URLParam(r, "id"), &id)
-		if pathErr != nil {
-			http.Error(w, fmt.Sprintf("Invalid format for parameter id: %s", pathErr), http.StatusBadRequest)
+		err = runtime.BindStyledParameter("simple", false, "id", chi.URLParam(r, "id"), &id)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("Invalid format for parameter id: %s", err), http.StatusBadRequest)
 			return
 		}
 
-		ctx = context.WithValue(r.Context(), "id", id)
+		ctx = context.WithValue(ctx, "id", id)
 
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
